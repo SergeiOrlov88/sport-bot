@@ -376,92 +376,34 @@ def admin_panel(message):
         parse_mode='Markdown'
     )
 
-# ===== ОБРАБОТКА АДМИН-КОМАНД =====
-@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
-def admin_callback_handler(call):
+# ===== ОБРАБОТКА ВСЕХ CALLBACK-КНОПОК =====
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    """Обработчик всех callback-кнопок"""
+    
+    # Админские команды
+    if call.data.startswith('admin_'):
+        admin_callback_handler(call)
+        return
+    
+    # Удаление участника
+    elif call.data.startswith('remove_'):
+        remove_user_handler(call)
+        return
+    
+    bot.answer_callback_query(call.id, "❌ Неизвестная команда")
+
+def remove_user_handler(call):
+    """Обработчик удаления участника"""
     if not is_admin(call.from_user.id):
         bot.answer_callback_query(call.id, "❌ Нет доступа!")
         return
     
-    data = load_data()
-    
-    if call.data == 'admin_set_time':
-        msg = bot.send_message(call.message.chat.id, "⏰ Введите новое время (например: 20:45):")
-        bot.register_next_step_handler(msg, lambda m: process_admin_time(m))
-    
-    elif call.data == 'admin_set_date':
-        msg = bot.send_message(call.message.chat.id, "📅 Введите новую дату (формат: ГГГГ-ММ-ДД):")
-        bot.register_next_step_handler(msg, lambda m: process_admin_date(m))
-    
-    elif call.data == 'admin_set_place':
-        msg = bot.send_message(call.message.chat.id, "📍 Введите новое место тренировки:")
-        bot.register_next_step_handler(msg, lambda m: process_admin_place(m))
-    
-    elif call.data == 'admin_new_training':
-        new_data = create_default_data()
-        bot.send_message(call.message.chat.id, "🔄 Создана новая тренировка! Все записи очищены.", parse_mode='Markdown')
-    
-    elif call.data == 'admin_open_reg':
-        data['registration_open'] = True
-        save_data(data)
-        bot.send_message(call.message.chat.id, "🔓 Запись открыта для всех!", parse_mode='Markdown')
-    
-    elif call.data == 'admin_close_reg':
-        data['registration_open'] = False
-        save_data(data)
-        bot.send_message(call.message.chat.id, "🔒 Запись закрыта!", parse_mode='Markdown')
-    
-    elif call.data == 'admin_add_user':
-        msg = bot.send_message(
-            call.message.chat.id,
-            "👤 *Добавление участника*\n\n"
-            "Введите имя для отображения в списке:",
-            parse_mode='Markdown'
-        )
-        bot.register_next_step_handler(msg, process_admin_add_user)
-    
-    elif call.data == 'admin_remove_user':
-        all_main = data["main"] + data.get("manual_entries", [])
-        all_reserve = data["reserve"]
-        all_users = all_main + all_reserve
-        
-        if not all_users:
-            bot.send_message(call.message.chat.id, "❌ Список участников пуст!")
-            return
-        
-        # Создаем список для удаления
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        for i, user in enumerate(all_users[:20]):  # Ограничиваем 20 кнопками
-            display_name = user.get('display_name', 'Неизвестно')
-            btn_text = f"{i+1}. {display_name}"
-            if user.get('is_manual'):
-                btn_text += " 👑"
-            markup.add(types.InlineKeyboardButton(btn_text, callback_data=f'remove_{i}'))
-        
-        bot.send_message(call.message.chat.id, "🗑️ *Выберите участника для удаления:*", 
-                        reply_markup=markup, parse_mode='Markdown')
-    
-    elif call.data == 'admin_stats':
-        all_main = data["main"] + data.get("manual_entries", [])
-        stats_text = (
-            f"📊 *ПОДРОБНАЯ СТАТИСТИКА*\n\n"
-            f"*Общая информация:*\n"
-            f"▪️ Основной список: {len(all_main)}/{MAX_MAIN}\n"
-            f"▪️ Резерв: {len(data['reserve'])}/{MAX_RESERVE}\n"
-            f"▪️ Всего записано: {len(all_main) + len(data['reserve'])}\n"
-            f"▪️ Ручных записей: {len(data.get('manual_entries', []))}\n\n"
-            f"*Время по Москве:*\n"
-            f"▪️ Текущее: {format_moscow_time()}\n"
-            f"▪️ Дата тренировки: {data['date']}\n"
-            f"▪️ Время тренировки: {data['time']}\n\n"
-            f"*Система:*\n"
-            f"▪️ Запись: {'открыта ✅' if data['registration_open'] else 'закрыта ❌'}\n"
-            f"▪️ Режим: {MODE_TEXT}"
-        )
-        bot.send_message(call.message.chat.id, stats_text, parse_mode='Markdown')
-    
-    elif call.data.startswith('remove_'):
+    try:
         idx = int(call.data.split('_')[1])
+        data = load_data()
+        
+        # Объединяем все списки
         all_main = data["main"] + data.get("manual_entries", [])
         all_reserve = data["reserve"]
         all_users = all_main + all_reserve
@@ -470,23 +412,23 @@ def admin_callback_handler(call):
             user_to_remove = all_users[idx]
             display_name = user_to_remove.get('display_name', 'Неизвестно')
             
-            # Удаляем из соответствующего списка
-            removed = False
+            # Определяем, откуда удаляем
+            removed_from = None
             if user_to_remove in data["main"]:
                 data["main"].remove(user_to_remove)
-                removed = True
+                removed_from = "main"
             elif user_to_remove in data.get("manual_entries", []):
                 data["manual_entries"].remove(user_to_remove)
-                removed = True
+                removed_from = "manual"
             elif user_to_remove in data["reserve"]:
                 data["reserve"].remove(user_to_remove)
-                removed = True
+                removed_from = "reserve"
             
-            if removed:
+            if removed_from:
                 save_data(data)
                 
                 # Если удалили из основного списка, переводим из резерва
-                if user_to_remove in (data["main"] + data.get("manual_entries", [])) and data["reserve"]:
+                if removed_from in ["main", "manual"] and data["reserve"]:
                     first_reserve = data["reserve"].pop(0)
                     data["main"].append(first_reserve)
                     promoted_name = first_reserve.get('display_name', 'Неизвестно')
@@ -495,23 +437,39 @@ def admin_callback_handler(call):
                         if first_reserve.get("id"):
                             bot.send_message(
                                 first_reserve["id"],
-                                f"🎉 *{promoted_name}, вы переведены в основной список!*"
+                                f"🎉 *{promoted_name}, вы переведены в основной список!*\n\n"
+                                f"📅 Тренировка: {data['date']}\n"
+                                f"⏰ Время: {data['time']}\n"
+                                f"📍 Место: {data['place']}"
                             )
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.error(f"Не удалось уведомить: {e}")
                     
                     save_data(data)
-                    bot.send_message(
-                        call.message.chat.id,
+                    
+                    # Обновляем сообщение
+                    bot.edit_message_text(
                         f"✅ *{display_name} удален(а)!*\n"
-                        f"🔄 *{promoted_name} переведен из резерва.*"
+                        f"🔄 *{promoted_name} переведен из резерва.*",
+                        call.message.chat.id,
+                        call.message.message_id,
+                        parse_mode='Markdown'
                     )
                 else:
-                    bot.send_message(call.message.chat.id, f"✅ *{display_name} удален(а) из списка!*")
+                    bot.edit_message_text(
+                        f"✅ *{display_name} удален(а) из списка!*",
+                        call.message.chat.id,
+                        call.message.message_id,
+                        parse_mode='Markdown'
+                    )
             else:
-                bot.send_message(call.message.chat.id, "❌ Ошибка при удалении")
+                bot.answer_callback_query(call.id, "❌ Ошибка при удалении")
         else:
-            bot.send_message(call.message.chat.id, "❌ Участник не найден")
+            bot.answer_callback_query(call.id, "❌ Участник не найден")
+    
+    except Exception as e:
+        logger.error(f"Ошибка в remove_user_handler: {e}")
+        bot.answer_callback_query(call.id, f"❌ Ошибка: {str(e)[:50]}")
     
     bot.answer_callback_query(call.id)
 
@@ -663,3 +621,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

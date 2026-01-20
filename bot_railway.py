@@ -30,7 +30,8 @@ else:
     MAX_RESERVE = 10
     MODE_TEXT = "РАБОЧИЙ РЕЖИМ"
 
-bot = telebot.TeleBot(TOKEN)
+# Используем skip_pending=True чтобы избежать конфликта 409
+bot = telebot.TeleBot(TOKEN, skip_pending=True)
 DATA_FILE = "/data/training_data.json"
 
 # ===== ТАЙМЗОНА МОСКВЫ (UTC+3) =====
@@ -67,7 +68,7 @@ def load_data():
                     'date': get_moscow_time().strftime('%Y-%m-%d'),
                     'place': 'Пехорка, вторник',
                     'registration_open': True,
-                    'manual_entries': []  # Для записей от админа
+                    'manual_entries': []
                 }
                 
                 for field, default_value in required_fields.items():
@@ -142,7 +143,7 @@ def start(message):
         parse_mode='Markdown'
     )
 
-# ===== ЗАПИСЬ НА ТРЕНИРОВКУ (С ВОЗМОЖНОСТЬЮ ВВОДА ИМЕНИ) =====
+# ===== ЗАПИСЬ НА ТРЕНИРОВКУ =====
 @bot.message_handler(func=lambda m: m.text == "📝 Записаться")
 def sign_up(message):
     data = load_data()
@@ -196,7 +197,7 @@ def process_name_input(message, user_id, username):
         "telegram_name": message.from_user.first_name,
         "display_name": custom_name,
         "username": username,
-        "time": format_moscow_time(),  # Время по Москве
+        "time": format_moscow_time(),
         "is_manual": False,
         "registered_by": user_id
     }
@@ -337,7 +338,7 @@ def cancel_registration(message):
     
     bot.send_message(message.chat.id, "❌ Вы не записаны на тренировку")
 
-# ===== АДМИН-ПАНЕЛЬ С РАСШИРЕННЫМИ ФУНКЦИЯМИ =====
+# ===== АДМИН-ПАНЕЛЬ =====
 @bot.message_handler(func=lambda m: m.text == "👑 Админ" and is_admin(m.from_user.id))
 def admin_panel(message):
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -380,39 +381,122 @@ def admin_panel(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     """Обработчик всех callback-кнопок"""
+    logger.info(f"Callback получен: {call.data} от пользователя {call.from_user.id}")
     
-    # Админские команды
-    if call.data.startswith('admin_'):
-        admin_callback_handler(call)
-        return
-    
-    # Удаление участника
-    elif call.data.startswith('remove_'):
-        remove_user_handler(call)
-        return
-    
-    bot.answer_callback_query(call.id, "❌ Неизвестная команда")
-
-def remove_user_handler(call):
-    """Обработчик удаления участника"""
-    if not is_admin(call.from_user.id):
+    # Проверка прав админа для всех админ-команд
+    if call.data.startswith('admin_') and not is_admin(call.from_user.id):
         bot.answer_callback_query(call.id, "❌ Нет доступа!")
         return
     
     try:
-        idx = int(call.data.split('_')[1])
-        data = load_data()
+        if call.data == 'admin_set_time':
+            msg = bot.send_message(call.message.chat.id, "⏰ Введите новое время (например: 20:45):")
+            bot.register_next_step_handler(msg, process_admin_time)
         
-        # Объединяем все списки
-        all_main = data["main"] + data.get("manual_entries", [])
-        all_reserve = data["reserve"]
-        all_users = all_main + all_reserve
+        elif call.data == 'admin_set_date':
+            msg = bot.send_message(call.message.chat.id, "📅 Введите новую дату (формат: ГГГГ-ММ-ДД):")
+            bot.register_next_step_handler(msg, process_admin_date)
         
-        if 0 <= idx < len(all_users):
+        elif call.data == 'admin_set_place':
+            msg = bot.send_message(call.message.chat.id, "📍 Введите новое место тренировки:")
+            bot.register_next_step_handler(msg, process_admin_place)
+        
+        elif call.data == 'admin_new_training':
+            new_data = create_default_data()
+            bot.send_message(call.message.chat.id, "🔄 Создана новая тренировка! Все записи очищены.", parse_mode='Markdown')
+        
+        elif call.data == 'admin_open_reg':
+            data = load_data()
+            data['registration_open'] = True
+            save_data(data)
+            bot.send_message(call.message.chat.id, "🔓 Запись открыта для всех!", parse_mode='Markdown')
+        
+        elif call.data == 'admin_close_reg':
+            data = load_data()
+            data['registration_open'] = False
+            save_data(data)
+            bot.send_message(call.message.chat.id, "🔒 Запись закрыта!", parse_mode='Markdown')
+        
+        elif call.data == 'admin_add_user':
+            msg = bot.send_message(
+                call.message.chat.id,
+                "👤 *Добавление участника*\n\n"
+                "Введите имя для отображения в списке:",
+                parse_mode='Markdown'
+            )
+            bot.register_next_step_handler(msg, process_admin_add_user)
+        
+        elif call.data == 'admin_remove_user':
+            data = load_data()
+            all_main = data["main"] + data.get("manual_entries", [])
+            all_reserve = data["reserve"]
+            all_users = all_main + all_reserve
+            
+            if not all_users:
+                bot.send_message(call.message.chat.id, "❌ Список участников пуст!")
+                return
+            
+            # СОЗДАЕМ ТЕКСТОВЫЙ СПИСОК (упрощенный вариант)
+            text = "🗑️ *Выберите номер участника для удаления:*\n\n"
+            for i, user in enumerate(all_users[:30]):  # Ограничиваем 30
+                display_name = user.get('display_name', 'Неизвестно')
+                if user.get('is_manual'):
+                    display_name += " 👑"
+                text += f"{i+1}. {display_name}\n"
+            
+            text += "\nОтправьте номер участника для удаления:"
+            
+            # Отправляем текстовый список
+            msg = bot.send_message(call.message.chat.id, text, parse_mode='Markdown')
+            
+            # Ждем ввода номера
+            bot.register_next_step_handler(msg, lambda m: process_remove_by_number(m, all_users))
+        
+        elif call.data == 'admin_stats':
+            data = load_data()
+            all_main = data["main"] + data.get("manual_entries", [])
+            stats_text = (
+                f"📊 *ПОДРОБНАЯ СТАТИСТИКА*\n\n"
+                f"*Общая информация:*\n"
+                f"▪️ Основной список: {len(all_main)}/{MAX_MAIN}\n"
+                f"▪️ Резерв: {len(data['reserve'])}/{MAX_RESERVE}\n"
+                f"▪️ Всего записано: {len(all_main) + len(data['reserve'])}\n"
+                f"▪️ Ручных записей: {len(data.get('manual_entries', []))}\n\n"
+                f"*Время по Москве:*\n"
+                f"▪️ Текущее: {format_moscow_time()}\n"
+                f"▪️ Дата тренировки: {data['date']}\n"
+                f"▪️ Время тренировки: {data['time']}\n\n"
+                f"*Система:*\n"
+                f"▪️ Запись: {'открыта ✅' if data['registration_open'] else 'закрыта ❌'}\n"
+                f"▪️ Режим: {MODE_TEXT}"
+            )
+            bot.send_message(call.message.chat.id, stats_text, parse_mode='Markdown')
+        
+        else:
+            bot.answer_callback_query(call.id, "❌ Неизвестная команда")
+            return
+    
+    except Exception as e:
+        logger.error(f"Ошибка обработки callback: {e}")
+        bot.answer_callback_query(call.id, f"❌ Ошибка: {str(e)[:50]}")
+    
+    bot.answer_callback_query(call.id)
+
+def process_remove_by_number(message, all_users):
+    """Удаление участника по номеру"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        num = int(message.text.strip())
+        if 1 <= num <= len(all_users):
+            idx = num - 1
             user_to_remove = all_users[idx]
             display_name = user_to_remove.get('display_name', 'Неизвестно')
             
-            # Определяем, откуда удаляем
+            data = load_data()
+            
+            # Удаляем из соответствующего списка
             removed_from = None
             if user_to_remove in data["main"]:
                 data["main"].remove(user_to_remove)
@@ -427,7 +511,7 @@ def remove_user_handler(call):
             if removed_from:
                 save_data(data)
                 
-                # Если удалили из основного списка, переводим из резерва
+                # Перевод из резерва при необходимости
                 if removed_from in ["main", "manual"] and data["reserve"]:
                     first_reserve = data["reserve"].pop(0)
                     data["main"].append(first_reserve)
@@ -437,44 +521,39 @@ def remove_user_handler(call):
                         if first_reserve.get("id"):
                             bot.send_message(
                                 first_reserve["id"],
-                                f"🎉 *{promoted_name}, вы переведены в основной список!*\n\n"
-                                f"📅 Тренировка: {data['date']}\n"
-                                f"⏰ Время: {data['time']}\n"
-                                f"📍 Место: {data['place']}"
+                                f"🎉 *{promoted_name}, вы переведены в основной список!*"
                             )
-                    except Exception as e:
-                        logger.error(f"Не удалось уведомить: {e}")
+                    except:
+                        pass
                     
                     save_data(data)
-                    
-                    # Обновляем сообщение
-                    bot.edit_message_text(
+                    bot.send_message(
+                        message.chat.id,
                         f"✅ *{display_name} удален(а)!*\n"
                         f"🔄 *{promoted_name} переведен из резерва.*",
-                        call.message.chat.id,
-                        call.message.message_id,
                         parse_mode='Markdown'
                     )
                 else:
-                    bot.edit_message_text(
+                    bot.send_message(
+                        message.chat.id,
                         f"✅ *{display_name} удален(а) из списка!*",
-                        call.message.chat.id,
-                        call.message.message_id,
                         parse_mode='Markdown'
                     )
             else:
-                bot.answer_callback_query(call.id, "❌ Ошибка при удалении")
+                bot.send_message(message.chat.id, "❌ Ошибка при удалении")
         else:
-            bot.answer_callback_query(call.id, "❌ Участник не найден")
-    
+            bot.send_message(message.chat.id, "❌ Неверный номер!")
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ Введите число!")
     except Exception as e:
-        logger.error(f"Ошибка в remove_user_handler: {e}")
-        bot.answer_callback_query(call.id, f"❌ Ошибка: {str(e)[:50]}")
-    
-    bot.answer_callback_query(call.id)
+        logger.error(f"Ошибка удаления: {e}")
+        bot.send_message(message.chat.id, f"❌ Ошибка: {str(e)[:100]}")
 
 def process_admin_add_user(message):
     """Добавление участника админом"""
+    if not is_admin(message.from_user.id):
+        return
+    
     custom_name = message.text.strip()
     
     if not custom_name:
@@ -613,7 +692,7 @@ def main():
     while True:
         try:
             logger.info("Запуск бота...")
-            bot.polling(none_stop=True, timeout=60)
+            bot.polling(none_stop=True, timeout=60, skip_pending=True)
         except Exception as e:
             logger.error(f"Ошибка бота: {e}")
             logger.info("Перезапуск через 10 секунд...")
@@ -621,4 +700,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

@@ -632,7 +632,37 @@ def admin_remove_user(message, all_users):
             bot.send_message(message.chat.id, "❌ Неверный номер!")
     except:
         bot.send_message(message.chat.id, "❌ Введите число!")
+@bot.message_handler(commands=['checkdata'])
+def check_data_now(message):
+    """Проверить текущие данные"""
+    import os, json
+    
+    text = "📊 *ПРОВЕРКА ДАННЫХ:*\n\n"
+    
+    if os.path.exists('training_data.json'):
+        with open('training_data.json', 'r', encoding='utf-8') as f:
+            data = json.load(f)
         
+        all_main = data.get('main', []) + data.get('manual_entries', [])
+        
+        text += f"✅ *Файл найден!*\n"
+        text += f"📁 Размер: {os.path.getsize('training_data.json')} байт\n\n"
+        text += f"👥 *Участники:*\n"
+        text += f"• Основной список: {len(all_main)} чел.\n"
+        text += f"• Резерв: {len(data.get('reserve', []))} чел.\n\n"
+        
+        if all_main:
+            text += "📋 *Список участников:*\n"
+            for i, user in enumerate(all_main, 1):
+                name = user.get('display_name', 'Неизвестно')
+                text += f"{i}. {name}\n"
+        else:
+            text += "📭 *Список пуст*\n"
+        
+    else:
+        text += "❌ *Файл training_data.json не найден!*\n"
+    
+    bot.send_message(message.chat.id, text, parse_mode='Markdown')
 
 # ===== ЗАПУСК =====
 def main():
@@ -648,6 +678,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 

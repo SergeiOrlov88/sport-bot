@@ -97,31 +97,93 @@ def create_default_data():
 def is_admin(user_id):
     return user_id == ADMIN_ID
 
-# ===== ПОИСК ФАЙЛОВ =====  ← ВСТАВЬ ЗДЕСЬ
-@bot.message_handler(commands=['find'])
-def find_data(message):
-    """Найти все файлы данных"""
+@bot.message_handler(commands=['emergency'])
+def emergency_recovery(message):
+    """ЭКСТРЕННОЕ ВОССТАНОВЛЕНИЕ ДАННЫХ"""
     import os, json, glob
     
-    text = "🔍 *ПОИСК ФАЙЛОВ ДАННЫХ:*\n\n"
+    text = "🚨 *ЭКСТРЕННОЕ ВОССТАНОВЛЕНИЕ*\n\n"
     
-    # Ищем все JSON файлы
-    json_files = glob.glob("*.json") + glob.glob("/tmp/*.json") + glob.glob("/app/*.json")
+    # 1. Ищем ВСЕ файлы
+    all_files = []
+    for root, dirs, files in os.walk('/'):
+        for file in files:
+            if file.endswith('.json'):
+                path = os.path.join(root, file)
+                all_files.append(path)
+        if len(all_files) > 50:
+            break
     
-    text += f"Найдено {len(json_files)} файлов:\n"
+    text += f"📂 Проверено {len(all_files)} файлов\n\n"
     
-    for file in json_files:
-        size = os.path.getsize(file)
-        text += f"📁 {file} - {size} байт\n"
+    # 2. Ищем наши данные
+    found_data = []
+    for file in all_files[:100]:  # Первые 100 файлов
+        try:
+            with open(file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Проверяем структуру наших данных
+            if isinstance(data, dict):
+                if 'main' in data or 'reserve' in data:
+                    main_count = len(data.get('main', []))
+                    reserve_count = len(data.get('reserve', []))
+                    manual_count = len(data.get('manual_entries', []))
+                    
+                    found_data.append({
+                        'file': file,
+                        'main': main_count,
+                        'reserve': reserve_count,
+                        'manual': manual_count,
+                        'data': data
+                    })
+                    
+                    text += f"✅ *НАЙДЕНЫ ДАННЫЕ!*\n"
+                    text += f"📁 Файл: `{file}`\n"
+                    text += f"👥 Участников: {main_count} осн, {reserve_count} резерв\n"
+                    
+                    # Показываем имена
+                    if main_count > 0:
+                        text += f"Список:\n"
+                        for user in data.get('main', [])[:5]:
+                            name = user.get('display_name', 'Неизвестно')
+                            text += f"• {name}\n"
+                        if main_count > 5:
+                            text += f"... и еще {main_count - 5}\n"
+                    
+                    text += "\n"
+                    
+        except:
+            continue
+    
+    if found_data:
+        # 3. Восстанавливаем
+        best_file = found_data[0]['file']
+        with open(best_file, 'r', encoding='utf-8') as f:
+            old_data = json.load(f)
         
-        if size < 10000:  # Показываем маленькие файлы
-            try:
-                with open(file, 'r') as f:
-                    data = json.load(f)
-                    if 'main' in data or 'reserve' in data:
-                        text += f"  ✅ ЭТО НАШИ ДАННЫЕ! Участников: {len(data.get('main', []))}\n"
-            except:
-                pass
+        # Сохраняем в текущий файл
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(old_data, f, indent=2)
+        
+        text += f"🎉 *ДАННЫЕ ВОССТАНОВЛЕНЫ!*\n"
+        text += f"📁 Из: {best_file}\n"
+        text += f"📁 В: {DATA_FILE}\n\n"
+        
+        # Показываем восстановленный список
+        text += "👥 *ВОССТАНОВЛЕННЫЙ СПИСОК:*\n"
+        all_main = old_data.get('main', []) + old_data.get('manual_entries', [])
+        for i, user in enumerate(all_main[:20], 1):
+            name = user.get('display_name', 'Неизвестно')
+            text += f"{i}. {name}\n"
+        
+        if len(all_main) > 20:
+            text += f"... и еще {len(all_main) - 20}\n"
+        
+    else:
+        text += "❌ *ДАННЫЕ НЕ НАЙДЕНЫ!*\n"
+        text += "Список участников пуст. Нужно записываться заново.\n"
+        text += f"Текущий файл: {DATA_FILE}"
     
     bot.send_message(message.chat.id, text, parse_mode='Markdown')
 
@@ -557,4 +619,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 

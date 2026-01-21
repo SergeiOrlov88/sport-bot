@@ -384,13 +384,22 @@ def process_name_input(message, user_id, username):
     
     bot.send_message(message.chat.id, confirmation, parse_mode='Markdown')
 
-# ===== СПИСОК УЧАСТНИКОВ (ИСПРАВЛЕННЫЙ) =====
 @bot.message_handler(func=lambda m: m.text == "👥 Список")
 def show_list(message):
     data = load_data()
     
-    # Объединяем все записи ОСНОВНОГО списка
+    # Объединяем все записи
     all_main = data["main"] + data.get("manual_entries", [])
+    
+    # Функция для экранирования текста для Markdown
+    def escape_markdown(text):
+        if not text:
+            return ""
+        # Экранируем все спецсимволы Markdown
+        escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for char in escape_chars:
+            text = text.replace(char, f'\\{char}')
+        return text
     
     text = (
         f"🏋️‍♂️ *ТРЕНИРОВКА {data['date']}* ({MODE_TEXT})\n"
@@ -399,11 +408,10 @@ def show_list(message):
         f"👥 *Лимиты:* {MAX_MAIN}+{MAX_RESERVE}\n\n"
     )
     
-    # Основной список
     text += f"✅ *Основной список ({len(all_main)}/{MAX_MAIN}):*\n"
     if all_main:
         for i, user in enumerate(all_main, 1):
-            display_name = user.get('display_name', 'Неизвестно')
+            display_name = escape_markdown(user.get('display_name', 'Неизвестно'))
             username = f"(@{user['username']})" if user.get('username') else ""
             time_str = f" - {user.get('time', '')}" if user.get('time') else ""
             manual_mark = " 👑" if user.get('is_manual') else ""
@@ -411,11 +419,10 @@ def show_list(message):
     else:
         text += "Пока никого\n"
     
-    # Резерв
     text += f"\n⏳ *Резерв ({len(data['reserve'])}/{MAX_RESERVE}):*\n"
     if data["reserve"]:
         for i, user in enumerate(data["reserve"], 1):
-            display_name = user.get('display_name', 'Неизвестно')
+            display_name = escape_markdown(user.get('display_name', 'Неизвестно'))
             username = f"(@{user['username']})" if user.get('username') else ""
             time_str = f" - {user.get('time', '')}" if user.get('time') else ""
             text += f"{i}. {display_name} {username}{time_str}\n"
@@ -424,14 +431,7 @@ def show_list(message):
     
     text += f"\n📊 *Всего записано:* {len(all_main) + len(data['reserve'])}"
     
-    # Дополнительная информация для админа
-    if is_admin(message.from_user.id):
-        text += f"\n\n🔧 *Отладка:*"
-        text += f"\n▪️ main: {len(data['main'])} записей"
-        text += f"\n▪️ manual_entries: {len(data.get('manual_entries', []))} записей"
-        text += f"\n▪️ reserve: {len(data['reserve'])} записей"
-        text += f"\n▪️ Файл: {DATA_FILE}"
-    
+    # Отправляем с Markdown
     bot.send_message(message.chat.id, text, parse_mode='Markdown')
 
 # ===== ОТМЕНА ЗАПИСИ =====
@@ -732,3 +732,4 @@ def process_admin_add_user(message):
     
     # Проверяем на дубликаты
     all_users = data["main"] + data["reserve"]
+

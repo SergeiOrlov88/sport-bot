@@ -94,6 +94,37 @@ def create_default_data():
     save_data(data)
     return data
 
+def is_admin(user_id):
+    return user_id == ADMIN_ID
+
+# ===== ПОИСК ФАЙЛОВ =====  ← ВСТАВЬ ЗДЕСЬ
+@bot.message_handler(commands=['find'])
+def find_data(message):
+    """Найти все файлы данных"""
+    import os, json, glob
+    
+    text = "🔍 *ПОИСК ФАЙЛОВ ДАННЫХ:*\n\n"
+    
+    # Ищем все JSON файлы
+    json_files = glob.glob("*.json") + glob.glob("/tmp/*.json") + glob.glob("/app/*.json")
+    
+    text += f"Найдено {len(json_files)} файлов:\n"
+    
+    for file in json_files:
+        size = os.path.getsize(file)
+        text += f"📁 {file} - {size} байт\n"
+        
+        if size < 10000:  # Показываем маленькие файлы
+            try:
+                with open(file, 'r') as f:
+                    data = json.load(f)
+                    if 'main' in data or 'reserve' in data:
+                        text += f"  ✅ ЭТО НАШИ ДАННЫЕ! Участников: {len(data.get('main', []))}\n"
+            except:
+                pass
+    
+    bot.send_message(message.chat.id, text, parse_mode='Markdown')
+
 def save_data(data):
     try:
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
@@ -510,6 +541,7 @@ def admin_remove_user(message, all_users):
             bot.send_message(message.chat.id, "❌ Неверный номер!")
     except:
         bot.send_message(message.chat.id, "❌ Введите число!")
+        
 
 # ===== ЗАПУСК =====
 def main():
@@ -525,3 +557,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

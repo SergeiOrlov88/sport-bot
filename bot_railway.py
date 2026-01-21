@@ -223,6 +223,35 @@ def start(message):
     
     bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
 
+@bot.message_handler(commands=['rebuild'])
+def rebuild_from_memory(message):
+    """Попытаться восстановить из памяти"""
+    
+    # Создаем новый файл с примером
+    new_data = {
+        'main': [
+            {'display_name': 'Иван Иванов', 'time': '20:00'},
+            {'display_name': 'Петр Петров', 'time': '20:05'},
+        ],
+        'reserve': [
+            {'display_name': 'Сергей Сергеев', 'time': '20:10'}
+        ],
+        'time': '20:45',
+        'date': datetime.now().strftime('%Y-%m-%d'),
+        'place': 'Пехорка, вторник',
+        'registration_open': True,
+        'manual_entries': []
+    }
+    
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(new_data, f, indent=2)
+    
+    bot.send_message(
+        message.chat.id,
+        "🔄 Создан новый файл с примером данных.\n"
+        "Теперь записывайте участников заново."
+    )
+
 # ===== СПИСОК УЧАСТНИКОВ (БЕЗОПАСНЫЙ) =====
 @bot.message_handler(func=lambda m: m.text == "👥 Список")
 def show_list(message):
@@ -619,5 +648,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
